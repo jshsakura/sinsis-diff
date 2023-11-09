@@ -132,16 +132,24 @@ class GuiBehavior:
                 hash_obj.update(data)
         return hash_obj.hexdigest()
 
-    def calculate_blake2_hash(self, file_path):
-        """파일의 해시 값을 계산하는 함수"""
-        hash_obj = hashlib.blake2b()
-        with open(file_path, 'rb') as file:
-            while True:
-                data = file.read(64*1024*1024)  # 64*1024*1024 KB 씩 데이터를 읽습니다.
-                if not data:
-                    break
-                hash_obj.update(data)
-        return hash_obj.hexdigest()
+    def calculate_file_hashes(self, file_a_path, file_b_path, hash_algorithms=('blake2', 'blake2')):
+        hashes = {'A': {}, 'B': {}}
+
+        for file_path, key in zip([file_a_path, file_b_path], ['A', 'B']):
+            with open(file_path, 'rb') as file:
+                while True:
+                    data = file.read(1024 * 1024)  # 64 KB 씩 데이터를 읽습니다.
+                    if not data:
+                        break
+                    for algorithm in hash_algorithms:
+                        if algorithm not in hashes[key]:
+                            if algorithm == 'blake2':
+                                hashes[key][algorithm] = hashlib.blake2b()
+                            else:
+                                hashes[key][algorithm] = hashlib.new(algorithm)
+                        hashes[key][algorithm].update(data)
+
+        return {key: {algorithm: hash_obj.hexdigest() for algorithm, hash_obj in values.items()} for key, values in hashes.items()}
 
     def should_skip_hash_compare(self, file_a_path, file_b_path):
         # Get the file sizes of file A and file B
@@ -174,8 +182,12 @@ class GuiBehavior:
                         self.get_row_item(file_a_path, file_b_path, "A"))
                     logging.debug(f'파일 A에만 존재: {file_a_path}')
                 elif os.path.exists(file_b_path) and hash_compare:
-                    hash_a = self.calculate_file_hash(file_a_path, 'blake2')
-                    hash_b = self.calculate_file_hash(file_b_path, 'blake2')
+                    hashes = self.calculate_file_hashes(
+                        file_a_path, file_b_path, ('blake2', 'blake2'))
+
+                    hash_a = hashes['A']['blake2']
+                    hash_b = hashes['B']['blake2']
+
                     if hash_a != hash_b:
                         diff_list.append(
                             self.get_row_item(file_a_path, file_b_path, "C"))
