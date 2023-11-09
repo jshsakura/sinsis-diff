@@ -112,10 +112,32 @@ class GuiBehavior:
 
     def calculate_file_hash(self, file_path, hash_algorithm='md5'):
         """파일의 해시 값을 계산하는 함수"""
-        hash_obj = hashlib.new(hash_algorithm)
+        if hash_algorithm == 'md5':
+            hash_obj = hashlib.md5()
+        elif hash_algorithm == 'sha256':
+            hash_obj = hashlib.sha256()
+        elif hash_algorithm == 'sha3':
+            hash_obj = hashlib.sha3_256()
+        elif hash_algorithm == 'blake2':
+            # BLAKE2b using cryptography library
+            hash_obj = hashlib.blake2b()
+        else:
+            raise ValueError("Unsupported hash algorithm")
+
         with open(file_path, 'rb') as file:
             while True:
-                data = file.read(1024*1024)  # 64 KB 씩 데이터를 읽습니다.
+                data = file.read(64*1024*1024)  # 64 KB 씩 데이터를 읽습니다.
+                if not data:
+                    break
+                hash_obj.update(data)
+        return hash_obj.hexdigest()
+
+    def calculate_blake2_hash(self, file_path):
+        """파일의 해시 값을 계산하는 함수"""
+        hash_obj = hashlib.blake2b()
+        with open(file_path, 'rb') as file:
+            while True:
+                data = file.read(64*1024*1024)  # 64*1024*1024 KB 씩 데이터를 읽습니다.
                 if not data:
                     break
                 hash_obj.update(data)
@@ -147,14 +169,13 @@ class GuiBehavior:
                 file_b_path = os.path.normpath(
                     os.path.join(folder_b, relative_path))
 
-                # if not os.path.exists(file_b_path):
-                # diff_list.append(
-                #     self.get_row_item(file_a_path, file_b_path, "A"))
-                # logging.debug(f'파일 A에만 존재: {file_a_path}')
-                # el
-                if os.path.exists(file_b_path) and hash_compare and self.should_skip_hash_compare(file_a_path, file_b_path):
-                    hash_a = self.calculate_file_hash(file_a_path)
-                    hash_b = self.calculate_file_hash(file_b_path)
+                if not os.path.exists(file_b_path):
+                    diff_list.append(
+                        self.get_row_item(file_a_path, file_b_path, "A"))
+                    logging.debug(f'파일 A에만 존재: {file_a_path}')
+                elif os.path.exists(file_b_path) and hash_compare:
+                    hash_a = self.calculate_file_hash(file_a_path, 'blake2')
+                    hash_b = self.calculate_file_hash(file_b_path, 'blake2')
                     if hash_a != hash_b:
                         diff_list.append(
                             self.get_row_item(file_a_path, file_b_path, "C"))
