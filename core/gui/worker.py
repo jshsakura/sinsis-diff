@@ -13,7 +13,7 @@ class RomScannerWorkerSignals(QObject):
     showLoading = pyqtSignal()  # 로딩 오버레이 보여주기 위한 신호
     hideLoading = pyqtSignal()  # 로딩 오버레이 숨기기 위한 신호
     resourcesCopyCompleted = pyqtSignal(int)
-    resourcesCopy = pyqtSignal(str, str, str)
+    resourcesCopy = pyqtSignal(str, str, str, bool)
 
 
 class RomScannerWorker(QRunnable):
@@ -60,7 +60,7 @@ class RomScannerWorker(QRunnable):
         elif self.action == 'copy':
             rows_to_remove = self.rows  # 여기에서 삭제하려는 행의 인덱스 목록을 생성합니다.
             self.signals.resourcesCopy.emit(self.gui_behavior.current_file_a_path,
-                                            self.gui_behavior.current_file_b_path, self.gui_behavior.current_status)
+                                            self.gui_behavior.current_file_b_path, self.gui_behavior.current_status, False)
         elif self.action == 'save':
             # 저장 폴더 경로
             directory3 = get_settings('directory3')
@@ -88,6 +88,7 @@ class RomScannerWorker(QRunnable):
             for fileRow in self.gui_behavior.all_roms_list:
                 # 파일 상태
                 status = fileRow['status']
+
                 current_path = ''
                 if status in ('A', 'B', 'C'):
                     if status == 'A':
@@ -101,7 +102,7 @@ class RomScannerWorker(QRunnable):
                     logging.debug(f'copy target path: {new_folder_path}')
 
                     self.gui_behavior.copy_file_to_target_folder_works(
-                        file_path, new_folder_path, status)
+                        new_folder_path, file_path, status, refresh=False)
                     work_cnt = work_cnt+1
 
             self.signals.resourcesCopyCompleted.emit(work_cnt)

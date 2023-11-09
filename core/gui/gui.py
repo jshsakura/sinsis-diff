@@ -8,9 +8,9 @@ import qdarktheme
 import subprocess
 import platform
 from .behavior import GuiBehavior
-from PyQt5.QtCore import Qt, QObject, QEvent
+from PyQt5.QtCore import Qt, QObject, QEvent, QSize
 from PyQt5.QtSvg import QSvgWidget
-from PyQt5.QtGui import QIcon, QStandardItemModel, QPixmap, QFontDatabase, QFont, QColor, QCursor
+from PyQt5.QtGui import QIcon, QStandardItemModel, QPixmap, QFontDatabase, QFont, QColor, QCursor, QStandardItem
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QGridLayout, QPushButton,  QWidget,
                              QTableView,  QHBoxLayout, QVBoxLayout, QAbstractItemView, QMenu, QAction,
                              QAbstractScrollArea, QLabel, QLineEdit, QStackedWidget, QMessageBox,
@@ -57,6 +57,8 @@ class Gui:
         self.settings_win()
         self.actions.handle_init()
 
+        # 셀 편집 완료 시 이벤트 연결
+        self.table_model.itemChanged.connect(self.handle_item_changed)
         # Connect the model signals to update the status bar
         self.table_model.rowsInserted.connect(self.update_titlebar)
         self.table_model.rowsRemoved.connect(self.update_titlebar)
@@ -84,8 +86,8 @@ class Gui:
         # Table
         self.table = QTableView()
 
-        headers = ['상태', '상위 폴더', '파일 경로', '기준 파일 이름', '수정일자', '파일 용량', '',
-                   '파일 경로', '추가 파일 이름', '수정일자', '파일 용량']
+        headers = ['상태', '상위 폴더', '파일 경로', '기준 파일 이름', '수정 일시', '파일 용량', '',
+                   '파일 경로', '수정 일시', '파일 용량', '파일 이름']
         self.table.setSizeAdjustPolicy(
             QAbstractScrollArea.AdjustToContentsOnFirstShow)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -122,16 +124,19 @@ class Gui:
         self.table.setColumnWidth(0, 85)
         self.table.setColumnWidth(1, 90)
         self.table.setColumnWidth(2, 90)
-        self.table.setColumnWidth(3, 165)
+        self.table.setColumnWidth(3, 160)
         self.table.setColumnWidth(4, 90)
         self.table.setColumnWidth(5, 80)
         self.table.setColumnWidth(6, 25)
         self.table.setColumnWidth(7, 90)
-        self.table.setColumnWidth(8, 165)
+        self.table.setColumnWidth(8, 140)
         self.table.setColumnWidth(9, 80)
 
-        # 파일 경로 컬럼 숨김
-        # self.table.setColumnHidden(4, True)
+        # 컬럼 숨김
+        self.table.setColumnHidden(2, True)
+        self.table.setColumnHidden(3, True)
+        self.table.setColumnHidden(4, True)
+        self.table.setColumnHidden(5, True)
 
         # '원본 파일명' 열을 오름차순으로 정렬합니다.
         self.table.sortByColumn(0, Qt.AscendingOrder)
@@ -150,10 +155,10 @@ class Gui:
         ) if not self.settings.isVisible() else self.settings.raise_())
 
         self.main.scan_btn = QPushButton(
-            QIcon(absp('res/icon/refresh-cw.svg')), ' 폴더 내 파일 비교')
+            QIcon(absp('res/icon/refresh-cw.svg')), ' 파일 비교')
 
         self.main.except_btn = QPushButton(
-            QIcon(absp('res/icon/file-minus.svg')), ' 목록에서 제외')
+            QIcon(absp('res/icon/file-minus.svg')), ' 작업 제외')
 
         self.main.save_btn = QPushButton(
             QIcon(absp('res/icon/save.svg')), ' 업데이트 저장')
@@ -218,7 +223,7 @@ class Gui:
                                  & Qt.CustomizeWindowHint)
 
         widget.setLayout(grid)
-        self.main.resize(1110, 514)
+        self.main.resize(700, 514)
         # Set size policies for the table
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -232,11 +237,15 @@ class Gui:
 
     # 특정 셀 위에 마우스를 올렸을 때 커서 모양 설정
     def setCursorToHand(self, index):
-        if index.column() == 3 or index.column() == 6 or index.column() == 8:
+        if index.column() == 3 or index.column() == 6 or index.column() == 7:
             model = self.table.model()  # 테이블의 모델 가져오기
+            row = index.row()
+            column = index.column()
 
-            if index.column() == 6:
-                self.table.setCursor(QCursor(Qt.PointingHandCursor))
+            if column == 6:
+                status = self.table_model.item(row, 11).text()
+                if status in ["A", "B", "C"]:
+                    self.table.setCursor(QCursor(Qt.PointingHandCursor))
             else:
                 cell_text = model.data(index, Qt.DisplayRole)  # 해당 셀의 데이터 가져오기
                 if cell_text.strip():
@@ -247,7 +256,7 @@ class Gui:
             self.table.setCursor(QCursor(Qt.ArrowCursor))
 
     def main_win(self):
-        self.main.scan_btn.clicked.connect(self.actions.set_scarn_file)
+        self.main.scan_btn.clicked.connect(self.actions.set_scan_file)
         self.main.except_btn.clicked.connect(self.actions.set_except)
         self.main.save_btn.clicked.connect(self.actions.set_save_output)
         # 페이지 이전/다음 버튼 클릭 시 해당 함수 연결
@@ -392,26 +401,53 @@ class Gui:
     def on_cell_clicked(self, index):
         row = index.row()
         column = index.column()
-        if column == 3:
+        if column == 2:
             # 셀의 내용을 가져옵니다.
             file_path = self.table_model.item(row, 2).text()
             if file_path:
                 self.open_in_explorer(file_path)
         elif column == 7:
             # 셀의 내용을 가져옵니다.
-            file_path = self.table_model.item(row, 6).text()
+            file_path = self.table_model.item(row, 7).text()
             if file_path:
                 self.open_in_explorer(file_path)
         elif column == 6:
             # 셀의 내용을 가져옵니다.
             icon = self.table_model.item(row, 6)
             status = self.table_model.item(row, 11).text()
-            logging.debug(status)
-            if icon and status:
-                file_a_path = self.table_model.item(row, 2).text()
-                file_b_path = self.table_model.item(row, 6).text()
+            file_a_path = self.table_model.item(row, 2).text()
+            file_b_path = self.table_model.item(row, 7).text()
+
+            if status in ['E']:
+                return
+            if status == 'C':
                 self.actions.copy_file_to_target_folder(
                     file_a_path, file_b_path, status)
+                return
+            if icon and status:
+                self.actions.copy_file_to_target_folder(
+                    file_a_path, file_b_path, status)
+                # 목록에서 예외처리
+                self.actions.update_row_from_all_roms_list(
+                    file_b_path, 'except')
+                self.actions.remove_roms_list.append(file_b_path)
+                self.table_model.item(row, 0).setText('파일 복사')
+                self.table_model.item(row, 0).setForeground(
+                    QColor(0, 204, 153))
+                self.table_model.item(row, 11).setText('E')
+
+                icon_path = absp('res/icon/check-square.svg')
+                icon = QIcon(icon_path)
+                size = QSize(32, 32)
+                pixmap = icon.pixmap(size)
+                work_icon = QIcon(pixmap)
+                file_work_item = QStandardItem()
+                file_work_item.setIcon(work_icon)
+                file_work_item.setFlags(file_work_item.flags(
+                ) & ~Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                file_work_item.setTextAlignment(
+                    Qt.AlignVCenter | Qt.AlignCenter)
+                self.table_model.setItem(row, 6, file_work_item)
 
     def open_in_explorer(self, file_path):
         folder_path = os.path.dirname(file_path)  # 파일의 폴더 경로를 얻습니다.
@@ -430,7 +466,7 @@ class Gui:
 
         # column 변수를 어떻게 정의했는지에 따라 정렬합니다.
         column = {0: "status", 1: "platform_name", 2: "file_a_path", 3: "file_a_name", 4: 'file_a_time', 5: 'file_a_byte', 6: "status",
-                  7: "file_b_path", 8: "file_b_name", 9: 'file_b_time', 10: 'file_b_byte'}
+                  7: "file_b_path", 8: "file_b_time", 9: 'file_b_byte', 10: 'file_b_name'}
 
         # 정렬 불가능한 열은 볼 것도 없음
         if not logical_index in column:
@@ -455,6 +491,17 @@ class Gui:
             else:
                 self.table.sortByColumn(logical_index, Qt.AscendingOrder)
                 self.table.horizontalHeader().setSortIndicator(logical_index, Qt.DescendingOrder)
+
+    def handle_item_changed(self, item):
+        # 아이템이 속한 모델을 가져옵니다.
+        # 변경된 아이템의 행과 열 번호를 얻습니다.
+        row = item.row()
+        column = item.column()
+        # 셀의 값이 변경되면 호출되는 메서드
+
+        if column == 0:
+            status = item.model().item(row, 0).text()
+            print(status)
 
 
 class LoadingOverlay(QWidget):

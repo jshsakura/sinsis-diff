@@ -27,6 +27,9 @@ class GuiBehavior:
         self.remove_roms_list = []  # 삭제할 롬 목록
         self.except_roms_list = []  # 삭제할 롬 목록
         self.msg_box = None
+        self.current_file_a_path = None
+        self.current_file_b_path = None
+        self.current_status = None
 
     def get_current_page_roms(self):
         # 현재 페이지에 해당하는 롬 목록을 반환
@@ -107,18 +110,26 @@ class GuiBehavior:
 
         self.all_roms_list = diff_list
 
-    def calculate_file_hash(self, file_path, hash_algorithm='sha256'):
+    def calculate_file_hash(self, file_path, hash_algorithm='md5'):
         """파일의 해시 값을 계산하는 함수"""
         hash_obj = hashlib.new(hash_algorithm)
         with open(file_path, 'rb') as file:
             while True:
-                data = file.read(65536)  # 64 KB 씩 데이터를 읽습니다.
+                data = file.read(1024*1024)  # 64 KB 씩 데이터를 읽습니다.
                 if not data:
                     break
                 hash_obj.update(data)
         return hash_obj.hexdigest()
 
-    def compare_folders_recursively(self, folder_a, folder_b, excluded_extensions=None, hash_compare=False):
+    def should_skip_hash_compare(self, file_a_path, file_b_path):
+        # Get the file sizes of file A and file B
+        file_a_size = os.path.getsize(file_a_path)
+        file_b_size = os.path.getsize(file_b_path)
+        logging.debug(f'파일 A 크기: {file_a_size} B 크기: {file_b_size}')
+        # Check if the file sizes are the same
+        return file_a_size == file_b_size
+
+    def compare_folders_recursively(self, folder_a, folder_b, excluded_extensions=None, hash_compare=True):
         if excluded_extensions is None:
             excluded_extensions = []
 
@@ -136,17 +147,18 @@ class GuiBehavior:
                 file_b_path = os.path.normpath(
                     os.path.join(folder_b, relative_path))
 
-                if not os.path.exists(file_b_path):
-                    diff_list.append(
-                        self.get_row_item(file_a_path, file_b_path, "A"))
-                    print(f'파일 A에만 존재: {file_a_path}')
-                elif hash_compare:
+                # if not os.path.exists(file_b_path):
+                # diff_list.append(
+                #     self.get_row_item(file_a_path, file_b_path, "A"))
+                # logging.debug(f'파일 A에만 존재: {file_a_path}')
+                # el
+                if os.path.exists(file_b_path) and hash_compare and self.should_skip_hash_compare(file_a_path, file_b_path):
                     hash_a = self.calculate_file_hash(file_a_path)
                     hash_b = self.calculate_file_hash(file_b_path)
                     if hash_a != hash_b:
                         diff_list.append(
                             self.get_row_item(file_a_path, file_b_path, "C"))
-                        print(f'파일 내용이 다름: {file_a_path}')
+                        logging.debug(f'파일 내용이 다름: {file_a_path}')
 
         for root, dirs, files in os.walk(folder_b):
             for file_b in files:
@@ -163,7 +175,7 @@ class GuiBehavior:
                 if not os.path.exists(file_a_path):
                     diff_list.append(self.get_row_item(
                         file_a_path, file_b_path, "B"))
-                    print(f'파일 B에만 존재: {file_b_path}')
+                    logging.debug(f'파일 B에만 존재: {file_b_path}')
 
         return diff_list
 
@@ -198,7 +210,7 @@ class GuiBehavior:
                 file_b_name = None
                 platform_b_name = None
                 file_b_time = None
-                print(file_a_size)
+                logging.debug(file_a_size)
             else:
                 file_a_byte = 0
                 file_a_size = None
@@ -210,13 +222,13 @@ class GuiBehavior:
                 file_b_name = get_file_name_without_extension(file_b_path)
                 platform_b_name = get_platform_name(file_b_path)
                 file_b_time = os.path.getmtime(file_b_path)
-                print(file_b_size)
+                logging.debug(file_b_size)
 
         item = {"file_a_path": file_a_path, "file_a_size": file_a_size, "file_a_byte": file_a_byte,
                 "file_a_name": file_a_name, "status": type, "file_a_platform_name": platform_a_name,
                 "file_b_path": file_b_path, "file_b_size": file_b_size, "file_b_byte": file_b_byte,
                 "file_b_name": file_b_name, "file_b_platform_name": platform_b_name,
-                "status_name": "Hash 불일치" if type == "C" else ("A에만 존재" if type == "A" else "B에만 존재"),
+                "status_name": "Hash 불일치" if type == "C" else ("A에만 존재" if type == "A" else "추가 파일"),
                 "file_a_time": file_a_time, "file_b_time": file_b_time,
                 "file_path": file_a_path if file_a_path else file_b_path,
                 "platform_name": platform_a_name if platform_a_name else platform_b_name
@@ -290,21 +302,24 @@ class GuiBehavior:
             file_a_path_item.setFlags(file_a_path_item.flags(
             ) & ~Qt.ItemIsEditable | Qt.ItemIsEnabled)
             self.gui.table_model.setItem(row, 2, file_a_path_item)
+            self.gui.table.setColumnHidden(2, True)
 
             # 원본 파일명 설정
             file_a_name_item = QStandardItem(file_a_name)
             file_a_name_item.setFlags(file_a_name_item.flags(
             ) & ~Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             self.gui.table_model.setItem(row, 3, file_a_name_item)
+            self.gui.table.setColumnHidden(3, True)
 
             # 파일 수정 일시
             file_a_time_item = QStandardItem(
                 self.get_file_mod_time(file_a_path))
             file_a_time_item.setFlags(file_a_time_item.flags(
             ) & ~Qt.ItemIsEditable | Qt.ItemIsEnabled)
-            self.gui.table_model.setItem(row, 4, file_a_time_item)
             file_a_time_item.setTextAlignment(
                 Qt.AlignVCenter | Qt.AlignCenter)
+            self.gui.table_model.setItem(row, 4, file_a_time_item)
+            self.gui.table.setColumnHidden(4, True)
 
             # 파일 용량
             file_a_size_item = QStandardItem(file_a_size)
@@ -313,6 +328,7 @@ class GuiBehavior:
             file_a_size_item.setTextAlignment(
                 Qt.AlignVCenter | Qt.AlignRight)
             self.gui.table_model.setItem(row, 5, file_a_size_item)
+            self.gui.table.setColumnHidden(5, True)
 
             # 단건 작업 버튼
             work_icon = None
@@ -343,18 +359,12 @@ class GuiBehavior:
             ) & ~Qt.ItemIsEditable | Qt.ItemIsEnabled)
             self.gui.table_model.setItem(row, 7, file_b_path_item)
 
-            # 원본 파일명 설정
-            file_b_name_item = QStandardItem(file_b_name)
-            file_b_name_item.setFlags(file_b_name_item.flags(
-            ) & ~Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            self.gui.table_model.setItem(row, 8, file_b_name_item)
-
             # 파일 수정 일시
             file_b_time_item = QStandardItem(
                 self.get_file_mod_time(file_b_path))
             file_b_time_item.setFlags(file_b_time_item.flags(
             ) & ~Qt.ItemIsEditable | Qt.ItemIsEnabled)
-            self.gui.table_model.setItem(row, 9, file_b_time_item)
+            self.gui.table_model.setItem(row, 8, file_b_time_item)
             file_b_time_item.setTextAlignment(
                 Qt.AlignVCenter | Qt.AlignCenter)
 
@@ -364,7 +374,13 @@ class GuiBehavior:
             ) & ~Qt.ItemIsEditable | Qt.ItemIsEnabled)
             file_b_size_item.setTextAlignment(
                 Qt.AlignVCenter | Qt.AlignRight)
-            self.gui.table_model.setItem(row, 10, file_b_size_item)
+            self.gui.table_model.setItem(row, 9, file_b_size_item)
+
+            # 추가 파일명 설정
+            file_b_name_item = QStandardItem(file_b_name)
+            file_b_name_item.setFlags(file_b_name_item.flags(
+            ) & ~Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            self.gui.table_model.setItem(row, 10, file_b_name_item)
 
             # 상태 컬럼
             status_item = QStandardItem(status)
@@ -459,10 +475,8 @@ class GuiBehavior:
             worker.signals.hideLoading.connect(self.gui.hide_loading_overlay)
             self.worker_thread.start(worker)
             pass
-        # 목록 새로고침
-        self.populate_table_with_roms()
 
-    def set_scarn_file(self):
+    def set_scan_file(self):
         logging.debug('파일 비교 시작')
         # 롬 폴더 경로 (이미 알고 있는 경로로 설정하세요)
         target_file_folder = get_settings('directory1')
@@ -482,8 +496,8 @@ class GuiBehavior:
         if work_cnt == 0:
             alert('작업된 파일이 없습니다.')
         else:
-            alert(f'output 폴더에 대상파일 {work_cnt} 건이 모두 복사되었습니다.\n목록을 새로 고칩니다.')
-            self.set_scarn_file()
+            alert(f'output 폴더에 대상파일 {work_cnt} 건이 모두 복사되었습니다.')
+            # self.set_scan_file()
 
     def confirm_update_save(self):
         message = "현재 목록의 A 폴더와 B 폴더의 차이가 있는 파일들을 \nB 폴더의 파일 기준으로 새로운 output 폴더에 복사합니다."
@@ -522,22 +536,36 @@ class GuiBehavior:
                 item = self.gui.table_model.item(row, column)
 
                 if column == 0:
-                    new_text = '제외 됨'
+                    new_text = '작업 제외'
                     font_color = QColor(255, 102, 102) if action == 'remove' else QColor(
                         255, 153, 0)
                     item.setText(new_text)
                     item.setForeground(font_color)
+
+                    icon_path = absp('res/icon/alert-triangle.svg')
+                    icon = QIcon(icon_path)
+                    size = QSize(32, 32)
+                    pixmap = icon.pixmap(size)
+                    work_icon = QIcon(pixmap)
+                    file_work_item = QStandardItem()
+                    file_work_item.setIcon(work_icon)
+                    file_work_item.setFlags(file_work_item.flags(
+                    ) & ~Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                    file_work_item.setTextAlignment(
+                        Qt.AlignVCenter | Qt.AlignCenter)
+                    self.gui.table_model.setItem(row, 6, file_work_item)
+
                 if item:
                     item_list.append(item.text())
                 else:
                     item_list.append(None)
 
             # A또는 B의 파일경로를 사실상 키로 사용해도 무관
-            file_path = item_list[12]
+            file_path = item_list[7]
 
             if action == 'except':
                 # 플랫폼 이름과 원본 파일명 가져오기
-                self.remove_roms_list.append(item_list[12])  # 11은 파일 경로
+                self.remove_roms_list.append(item_list[7])  # 11은 파일 경로
 
             self.update_row_from_all_roms_list(file_path, action)
 
@@ -615,7 +643,6 @@ class GuiBehavior:
             set_settings('directory3', '')
             settings.append(None)
 
-        print(self.gui.file_directory_except_ext.text())
         if self.gui.file_directory_except_ext.text():
             set_settings('except_ext',
                          self.gui.file_directory_except_ext.text())
@@ -656,8 +683,11 @@ class GuiBehavior:
             return None
 
     def copy_file_to_target_folder(self, file_a_path, file_b_path, status):
-        self.current_file_a_path = file_a_path
-        self.current_file_b_path = file_b_path
+        logging.debug(f'파일A: {file_a_path}, 파일B:{file_b_path}, 상태: {status}')
+        self.current_file_a_path = file_a_path if file_a_path else get_settings(
+            'directory1')
+        self.current_file_b_path = file_b_path if file_b_path else get_settings(
+            'directory2')
         self.current_status = status
 
         # 스캔 시작 버튼을 누를 때 로딩 오버레이를 표시합니다.
@@ -668,53 +698,69 @@ class GuiBehavior:
             self.copy_file_to_target_folder_works)
         self.worker_thread.start(worker)
 
-        # 일단 재조회
-        worker = RomScannerWorker(self, action='scan')
-        worker.signals.showLoading.connect(self.gui.show_loading_overlay)
-        worker.signals.hideLoading.connect(self.gui.hide_loading_overlay)
-        worker.signals.romsListReady.connect(self.populate_table_with_roms)
-        self.worker_thread.start(worker)
-
-    def copy_file_to_target_folder_works(self, file_a_path, file_b_path, status):
+    def copy_file_to_target_folder_works(self, file_a_path, file_b_path, status, refresh=False):
         if status == "C":
             alert("두 파일의 Hash 값이 다릅니다.")
             return
-        elif status == "A":
-            # 대상 폴더 경로
-            current_folder = get_settings('directory1')
-            target_folder = file_b_path if file_b_path else get_settings(
-                'directory2')
+        if not status in ["A", "B"]:
+            return
 
-            # 동일한 폴더 구조로 복사
-            target_path = os.path.normpath(os.path.join(target_folder, os.path.relpath(
-                file_a_path, current_folder)))
-            target_dir = os.path.dirname(target_path)
+        if not file_a_path or file_a_path == '':
+            file_a_path = get_settings('directory1')
+            logging.debug(f'A 경로가 지정되지 않았습니다. {file_a_path}')
+        elif not file_b_path or file_b_path == '':
+            file_b_path = get_settings('directory2')
+            logging.debug(f'B 경로가 지정되지 않았습니다. {file_b_path}')
 
-            if not os.path.exists(target_dir):
-                os.makedirs(target_dir)
+        source_path = ''
+        source_folder = ''
+        target_folder = ''
 
-            shutil.copyfile(file_a_path, target_path)
-            logging.debug(f'B 폴더로 복사 {file_a_path} -> {target_path}')
-
+        # 대상 폴더 경로 설정
+        if status == "A":
+            source_path = file_a_path
+            source_folder = get_settings('directory1')
+            target_folder = file_b_path
         elif status == "B":
-            # 대상 폴더 경로
-            current_folder = get_settings('directory2')
-            target_folder = file_a_path if file_a_path else get_settings(
-                'directory1')
+            source_path = file_b_path
+            source_folder = get_settings('directory2')
+            target_folder = file_a_path
+        else:
+            return  # 이외의 상태에 대한 처리가 필요할 수 있음
 
-            # 동일한 폴더 구조로 복사
-            target_path = os.path.normpath(os.path.join(target_folder, os.path.relpath(
-                file_a_path, current_folder)))
-            target_dir = os.path.dirname(target_path)
+        # 동일한 폴더 구조로 복사
+        logging.debug(
+            f'소스경로: {source_path}, 소스폴더: {source_folder}, 타겟경로: {target_folder}')
 
-            if not os.path.exists(target_dir):
-                os.makedirs(target_dir)
+        relative_path = os.path.relpath(source_path, source_folder)
+        file_name = os.path.basename(source_path)
+        logging.debug(f'소스경로: {relative_path}')
 
-            shutil.copyfile(file_a_path, target_path)
-            if file_a_path:
-                folder_name = 'output'
+        target_path = os.path.normpath(
+            os.path.join(target_folder, relative_path))
+        target_dir = os.path.dirname(target_path)
+
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir)
+
+        # 소스 파일과 대상 파일이 동일한 파일인지 확인
+        if source_path != target_path:
+            logging.debug(f'소스경로: {source_path}')
+            logging.debug(f'타겟경로: {target_path}')
+
+            shutil.copy2(source_path, target_path)
+
+            if status == "A":
+                folder_name = 'B' if file_b_path else 'output'
+            elif status == "B":
+                folder_name = 'A' if file_a_path else 'output'
             else:
-                folder_name = 'A'
+                folder_name = 'output'  # 이외의 상태에 대한 처리가 필요할 수 있음
 
             logging.debug(
-                f'{folder_name} 폴더로 복사 {file_b_path} -> {target_path}')
+                f'{folder_name} 폴더로 복사 {source_path} -> {target_path}')
+        else:
+            logging.warning(f'소스 파일과 대상 파일이 동일합니다: {source_path}')
+
+        if refresh:
+            self.set_scan_file()
