@@ -124,32 +124,14 @@ class GuiBehavior:
         else:
             raise ValueError("Unsupported hash algorithm")
 
-        with open(file_path, 'rb') as file:
+        # 파일 버퍼 사이즈 1MB 지정
+        with open(file_path, 'rb', buffering=1048576) as file:
             while True:
                 data = file.read(64*1024*1024)  # 64 KB 씩 데이터를 읽습니다.
                 if not data:
                     break
                 hash_obj.update(data)
         return hash_obj.hexdigest()
-
-    def calculate_file_hashes(self, file_a_path, file_b_path, hash_algorithms=('blake2', 'blake2')):
-        hashes = {'A': {}, 'B': {}}
-
-        for file_path, key in zip([file_a_path, file_b_path], ['A', 'B']):
-            with open(file_path, 'rb') as file:
-                while True:
-                    data = file.read(1024 * 1024)  # 64 KB 씩 데이터를 읽습니다.
-                    if not data:
-                        break
-                    for algorithm in hash_algorithms:
-                        if algorithm not in hashes[key]:
-                            if algorithm == 'blake2':
-                                hashes[key][algorithm] = hashlib.blake2b()
-                            else:
-                                hashes[key][algorithm] = hashlib.new(algorithm)
-                        hashes[key][algorithm].update(data)
-
-        return {key: {algorithm: hash_obj.hexdigest() for algorithm, hash_obj in values.items()} for key, values in hashes.items()}
 
     def should_skip_hash_compare(self, file_a_path, file_b_path):
         # Get the file sizes of file A and file B
@@ -159,15 +141,17 @@ class GuiBehavior:
         # Check if the file sizes are the same
         return file_a_size == file_b_size
 
-    def compare_folders_recursively(self, folder_a, folder_b, excluded_extensions=None, hash_compare=True):
+    def compare_folders_recursively(self, folder_a, folder_b, excluded_extensions=None, hash_compare=False):
         if excluded_extensions is None:
             excluded_extensions = []
 
         diff_list = []
 
         for root, dirs, files in os.walk(folder_a):
+
             for file_a in files:
                 file_a_path = os.path.normpath(os.path.join(root, file_a))
+
                 relative_path = os.path.normpath(
                     os.path.relpath(file_a_path, folder_a))
 
@@ -178,15 +162,19 @@ class GuiBehavior:
                     os.path.join(folder_b, relative_path))
 
                 if not os.path.exists(file_b_path):
-                    diff_list.append(
-                        self.get_row_item(file_a_path, file_b_path, "A"))
+                    # diff_list.append(
+                    #     self.get_row_item(file_a_path, file_b_path, "A"))
                     logging.debug(f'파일 A에만 존재: {file_a_path}')
+                    continue
+                elif os.path.exists(file_a_path) and os.path.exists(file_b_path) and self.compare_modification_dates(file_a_path, file_b_path) and self.compare_file_sizes(file_a_path, file_b_path):
+                    logging.debug(f'수정일자 동일: {file_a_path}')
+                    continue
                 elif os.path.exists(file_b_path) and hash_compare:
-                    hashes = self.calculate_file_hashes(
-                        file_a_path, file_b_path, ('blake2', 'blake2'))
-
-                    hash_a = hashes['A']['blake2']
-                    hash_b = hashes['B']['blake2']
+                    hash_algorithm = 'blake2'
+                    hash_a = self.calculate_file_hash(
+                        file_a_path, hash_algorithm)
+                    hash_b = self.calculate_file_hash(
+                        file_b_path, hash_algorithm)
 
                     if hash_a != hash_b:
                         diff_list.append(
@@ -277,6 +265,8 @@ class GuiBehavior:
     def populate_table_with_roms(self):
         roms_list = self.get_current_page_roms()
         # 테이블을 비우고 진행
+        logging.debug(f'테이블 클리어')
+
         self.gui.table_model.removeRows(0, self.gui.table_model.rowCount())
 
         italic_font = QFont(self.gui.font)
@@ -452,6 +442,7 @@ class GuiBehavior:
             self.gui.main.page_prev_btn.setDisabled(False)
             self.gui.main.page_next_btn.setDisabled(False)
 
+        logging.debug(f'업데이트 타이틀!')
         self.gui.update_titlebar()
 
     def set_save_output(self):
@@ -797,3 +788,59 @@ class GuiBehavior:
 
         if refresh:
             self.set_scan_file()
+
+    def compare_modification_dates(self, file1, file2):
+        try:
+            mtime1 = os.path.getmtime(file1)
+            mtime2 = os.path.getmtime(file2)
+
+            if mtime1 < mtime2:
+                logging.debug(f"{file1} was modified earlier than {file2}")
+                return False
+            elif mtime1 > mtime2:
+                logging.debug(f"{file1} was modified later than {file2}")
+                return False
+            else:
+                logging.debug(
+                    f"The modification times of {file1} and {file2} are the same")
+                return True
+        except FileNotFoundError as e:
+            logging.debug(f"Error: {e}")
+            return False
+
+    def compare_creation_dates(self, file1, file2):
+        try:
+            ctime1 = os.path.getctime(file1)
+            ctime2 = os.path.getctime(file2)
+
+            if ctime1 < ctime2:
+                logging.debug(f"{file1} was created earlier than {file2}")
+                return False
+            elif ctime1 > ctime2:
+                logging.debug(f"{file1} was created later than {file2}")
+                return False
+            else:
+                logging.debug(
+                    f"The creation times of {file1} and {file2} are the same")
+                return True
+        except FileNotFoundError as e:
+            logging.debug(f"Error: {e}")
+            return False
+
+    def compare_file_sizes(self, file1, file2):
+        try:
+            size1 = os.path.getsize(file1)
+            size2 = os.path.getsize(file2)
+
+            if size1 < size2:
+                logging.debug(f"{file1} is smaller than {file2}")
+                return False
+            elif size1 > size2:
+                logging.debug(f"{file1} is larger than {file2}")
+                return False
+            else:
+                logging.debug(f"The sizes of {file1} and {file2} are the same")
+                return True
+        except FileNotFoundError as e:
+            logging.debug(f"Error: {e}")
+            return False

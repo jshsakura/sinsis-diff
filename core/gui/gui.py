@@ -13,7 +13,7 @@ from PyQt5.QtSvg import QSvgWidget
 from PyQt5.QtGui import QIcon, QStandardItemModel, QPixmap, QFontDatabase, QFont, QColor, QCursor, QStandardItem
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QGridLayout, QPushButton,  QWidget,
                              QTableView,  QHBoxLayout, QVBoxLayout, QAbstractItemView, QMenu, QAction,
-                             QAbstractScrollArea, QLabel, QLineEdit, QStackedWidget, QMessageBox,
+                             QAbstractScrollArea, QLabel, QLineEdit, QStackedWidget, QMessageBox, QTextEdit,
                              QFormLayout, QListWidget, QComboBox, QSizePolicy, QHeaderView, QHeaderView, QStyledItemDelegate)
 from .helpers import *
 
@@ -208,16 +208,27 @@ class Gui:
         button_layout.addWidget(self.main.page_prev_btn, 1, 0)
         button_layout.addWidget(self.main.page_next_btn, 1, 1)
 
+        # self.log_textedit = QTextEdit(self.main)
+        # self.log_textedit.setReadOnly(True)
+        # self.log_textedit.setFixedHeight(150)  # 높이를 200 픽셀로 설정
+        # # Set up logging
+        # logging.basicConfig(
+        #     level=logging.DEBUG,
+        #     format='%(asctime)s - %(levelname)s - %(message)s',
+        #     handlers=[QtHandler(self.log_textedit.append)]
+        # )
+
         # 그리드 먼저 추가
         grid.addWidget(self.table, 1, 0, 1, 7)
-
+        # 로그 텍스트 추가
+        # grid.addWidget(self.log_textedit, 2, 0, 1, 7)
         # 하단 버튼 추가
-        grid.addWidget(self.main.settings_btn, 2, 0)
-        grid.addWidget(self.main.scan_btn, 2, 1)
-        grid.addWidget(self.main.except_btn, 2, 2)
-        grid.addWidget(self.main.save_btn, 2, 3)
-        grid.addWidget(self.main.page_label, 2, 5)
-        grid.addWidget(button_container, 2, 6)
+        grid.addWidget(self.main.settings_btn, 3, 0)
+        grid.addWidget(self.main.scan_btn, 3, 1)
+        grid.addWidget(self.main.except_btn, 3, 2)
+        grid.addWidget(self.main.save_btn, 3, 3)
+        grid.addWidget(self.main.page_label, 3, 5)
+        grid.addWidget(button_container, 3, 6)
 
         self.main.setWindowFlags(self.main.windowFlags()
                                  & Qt.CustomizeWindowHint)
@@ -502,6 +513,16 @@ class Gui:
         if column == 0:
             status = item.model().item(row, 0).text()
             print(status)
+
+
+class QtHandler(logging.Handler):
+    def __init__(self, log_append_function):
+        super().__init__()
+        self.log_append_function = log_append_function
+
+    def emit(self, record):
+        log_message = self.format(record)
+        self.log_append_function(log_message)
 
 
 class LoadingOverlay(QWidget):
